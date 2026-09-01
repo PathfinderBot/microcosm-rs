@@ -224,18 +224,40 @@ fn run(
             let stay_alive = stay_alive.clone();
             let staying_alive = stay_alive.clone();
             move || {
-                if let Err(e) = consume(
-                    storage,
-                    qsize,
-                    fixture,
-                    fixture_preserve_cursor,
-                    stream,
-                    staying_alive,
-                    link_from_collections,
-                ) {
-                    eprintln!("jetstream finished with error: {e}");
+                // If the consumer dies (panic or error), the whole process must
+                // die with it: the api server thread below blocks on the
+                // cancellation token, so without a hard exit the pod would sit
+                // there half-alive with a dead consumer but healthy probes.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    consume(
+                        storage,
+                        qsize,
+                        fixture,
+                        fixture_preserve_cursor,
+                        stream,
+                        staying_alive,
+                        link_from_collections,
+                    )
+                }));
+                match result {
+                    Ok(Ok(())) => {
+                        // graceful shutdown (e.g. end of fixture); release the token
+                        stay_alive.drop_guard();
+                    }
+                    Ok(Err(e)) => {
+                        eprintln!("jetstream consumer finished with error: {e}; exiting");
+                        std::process::exit(1);
+                    }
+                    Err(_payload) => {
+                        // NB: can't resume_unwind here -- it would unwind this
+                        // thread and thread::scope would wait forever on the
+                        // api server thread, hanging the process half-dead
+                        // again. hard-exit instead. (the rocks store's Drop
+                        // already ran while unwinding out of consume().)
+                        eprintln!("jetstream consumer thread panicked; exiting");
+                        std::process::exit(101);
+                    }
                 }
-                stay_alive.drop_guard();
             }
         });
 

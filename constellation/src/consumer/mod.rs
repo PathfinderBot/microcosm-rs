@@ -8,6 +8,7 @@ use jetstream::consume_jetstream;
 use jsonl_file::consume_jsonl_file;
 use metrics::{counter, histogram};
 use microcosm_links::{parse_any_link, record::walk_record, CollectedLink};
+use std::panic::resume_unwind;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -68,7 +69,13 @@ pub fn consume(
         }
     }
 
-    consumer_handle.join().unwrap()
+    // if the producer thread panicked, re-raise its original panic payload
+    // (rather than unwrap()'ing into an opaque `Any { .. }`) so callers see the
+    // real panic message and can propagate the crash.
+    match consumer_handle.join() {
+        Ok(result) => result,
+        Err(payload) => resume_unwind(payload),
+    }
 }
 
 pub fn get_actionable(event: &JsonValue) -> Option<(ActionableEvent, u64)> {
