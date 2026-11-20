@@ -29,7 +29,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release -p constellation \
     && cp target/release/main /usr/local/bin/constellation
 
-FROM debian:12.14-slim AS runtime
+FROM debian:12.15-slim AS runtime
 
 # ca-certificates for TLS to jetstream/tap; libssl3 for native-tls at runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
